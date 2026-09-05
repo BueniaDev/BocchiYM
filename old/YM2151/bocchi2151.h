@@ -1,6 +1,6 @@
 /*
     This file is part of the BocchiYM family of cycle-accurate Yamaha FM sound chip emulators.
-    Copyright (C) 2026 BueniaDev.
+    Copyright (C) 2024 BueniaDev.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -51,7 +51,6 @@ namespace bocchi2151
 	    ~Bocchi2151();
 
 	    void init();
-	    void tick();
 	    void tickCLK(bool clk);
 
 	    Bocchi2151Pins &getPins()
@@ -73,69 +72,75 @@ namespace bocchi2151
 	    void tickInternal();
 	    void tickTimingGen();
 	    void tickReg();
-	    void tickPhase();
-	    void tickOp();
-	    /*
-	    void tickAcc();
-	    */
 
-	    bool phim = false;
+	    bool clk_val = false;
 
-	    bool mrst = false;
+	    bool prev_clk = false;
+	    bool ic_val = false;
+	    bool prev_ic = false;
 
 	    bool clk_rise = false;
 	    bool clk_fall = false;
-	    bool prev_clk = false;
 
-	    bool is_rst1 = false;
-	    bool is_rst2 = false;
+	    bool is_reset = false;
+	    bool is_res_edge = true;
 
-	    bool phi1_dff_q = false;
+	    int reset_sr = 0;
+
+	    bool phi1p = true;
+	    bool phi1n = true;
 
 	    bool phi1_rise = false;
 	    bool phi1_fall = false;
 
-	    uint8_t prev_timing_counter = 0;
-	    uint8_t timing_counter = 0;
+	    bool synced_mrst_n = false;
+	    bool mrst_n = false;
+
+	    int timing_ctr = 0;
+
+	    bool cycle_01 = false;
+	    bool cycle_31 = false;
+
+	    bool areg_rq_latch = false;
+	    bool dreg_rq_latch = false;
+
+	    array<bool, 3> areg_rq_synced = {{false}};
+	    array<bool, 3> dreg_rq_synced = {{false}};
 
 	    bool addr_ld = false;
-	    bool addr_ld_next = false;
+	    bool data_ld = false;
 
-	    bool addr_latch[3] = {false, false, false};
-	    bool data_latch[3] = {false, false, false};
+	    uint8_t dbus_temp = 0;
+	    uint8_t dbus_latch = 0;
 
-	    uint8_t addr_val = 0;
+	    bool write_busy = false;
 
-	    uint8_t hireg_counter = 0;
-
-	    uint8_t busy_counter = 0;
-	    bool is_busy_cnt = false;
-	    bool is_busy_full = false;
-	    bool is_busy_ov = false;
-	    bool is_write_busy = false;
-
-	    uint8_t data_in = 0;
-	    uint8_t data_in_temp = 0;
-
-	    bool reg_addr_ready = false;
-	    uint8_t reg_addr_val = 0;
-	    bool reg_data_ready = false;
-	    uint8_t reg_data_val = 0;
+	    uint8_t busy_cntr = 0;
+	    bool busycntr_cnt = false;
+	    bool busycntr_ovfl = false;
+	    bool busyctr_full = false;
 
 	    bool loreg_addr_valid = false;
+	    bool loreg_data_en = false;
+	    uint8_t loreg_addr = 0;
 
-	    uint16_t calcKCode();
+	    bool noise_enable = false;
+	    uint8_t noise_freq = 0;
 
-	    array<uint8_t, 8> channel_rl = {{0}};
-	    array<uint8_t, 8> channel_fb = {{0}};
-	    array<uint8_t, 8> channel_alg = {{0}};
+	    bool timer_a_run = false;
+	    bool timer_b_run = false;
+	    bool timer_a_irq_en = false;
+	    bool timer_b_irq_en = false;
+	    bool csm_reg = false;
 
-	    array<uint8_t, 8> channel_kc = {{0}};
-	    array<uint8_t, 8> channel_kf = {{0}};
-	    array<uint8_t, 8> channel_pms = {{0}};
-	    array<uint8_t, 8> channel_ams = {{0}};
+	    uint8_t key_on_temp = 0;
 
-	    #include "bocchi2151_tables.inl"
+	    uint8_t lfo_freq = 0;
+
+	    uint8_t pms_data = 0;
+	    uint8_t ams_data = 0;
+
+	    #include "opm_tables.inl"
     };
 };
 

@@ -1,6 +1,6 @@
 /*
     This file is part of the BocchiYM family of cycle-accurate Yamaha FM sound chip emulators.
-    Copyright (C) 2024 BueniaDev.
+    Copyright (C) 2026 BueniaDev.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -44,12 +44,22 @@ namespace bocchi2151
 	current_pins = {};
     }
 
+    void Bocchi2151::tick()
+    {
+	tickCLK(true);
+	tickCLK(false);
+    }
+
     void Bocchi2151::tickCLK(bool clk)
     {
-	clk_val = clk;
+	phim = clk;
 	clk_rise = (!prev_clk && clk);
 	clk_fall = (prev_clk && !clk);
-	tickInternal();
+
+	if (prev_clk != clk)
+	{
+	    tickInternal();
+	}
 
 	prev_clk = clk;
     }
@@ -57,209 +67,288 @@ namespace bocchi2151
     // Internal clock tick function
     void Bocchi2151::tickInternal()
     {
-	tickTimingGen();
+	// TODO: Finish implementing this
+	tickPhase();
 	tickReg();
+	tickTimingGen();
     }
 
-    // Tick timing generator
-    // TODO: Finish implementing this function
+    // Tick function for timing generator
     void Bocchi2151::tickTimingGen()
     {
-	if (clk_rise)
+	if (phi1_fall)
 	{
-	    reset_sr = (((reset_sr << 1) | current_pins.pin_icn) & 0x3);
-	    is_res_edge = (!testbit(reset_sr, 0) && testbit(reset_sr, 1));
+	    mrst = !current_pins.pin_icn;
 	}
 
-	current_pins.pin_phi1 = phi1p;
-	phi1_rise = !(phi1n || !clk_rise);
-	phi1_fall = !(phi1p || !clk_rise);
-
-	if (clk_fall || !current_pins.pin_icn)
+	if (clk_fall)
 	{
-	    if (is_res_edge || !current_pins.pin_icn)
+	    is_rst1 = current_pins.pin_icn;
+	}
+
+	if (clk_rise)
+	{
+	    is_rst2 = is_rst1;
+	}
+
+	if (clk_rise)
+	{
+	    phi1_dff_q = ((is_rst2 && !current_pins.pin_icn) || !phi1_dff_q);
+	} 
+
+	phi1_rise = (phi1_dff_q && clk_rise);
+	phi1_fall = (!phi1_dff_q && clk_rise);
+
+	current_pins.pin_phi1 = phi1_dff_q;
+
+	if (phi1_fall)
+	{
+	    uint8_t sh_counter = ((timing_counter + 27) % 32);
+	    current_pins.pin_sh1 = (((sh_counter & 24) == 8) || mrst);
+	    current_pins.pin_sh2 = (((sh_counter & 24) == 24) || mrst);
+	}
+
+	if (phi1_fall)
+	{
+	    if (mrst)
 	    {
-		phi1p = true;
-		phi1n = true;
+		timing_counter = 0;
 	    }
 	    else
 	    {
-		phi1n = phi1p;
-		phi1p = !phi1p;
+		timing_counter = ((timing_counter + 1) & 0x1F);
+	    }
+	}
+    }
+
+    // Tick function for registers
+    void Bocchi2151::tickReg()
+    {
+	// TODO: Finish implementing this
+	if (!current_pins.pin_csn && !current_pins.pin_wrn)
+	{
+	    data_in_temp = current_pins.data;
+	}
+
+	if (phi1_fall)
+	{
+	    if (mrst)
+	    {
+		data_in = 0;
+	    }
+	    else if (addr_latch[1] || data_latch[1])
+	    {
+		data_in = data_in_temp;
 	    }
 	}
 
-	if (phi1_fall)
+	if (addr_latch[2])
 	{
-	    synced_mrst_n = testbit(reset_sr, 0);
-	}
-
-	mrst_n = (synced_mrst_n && current_pins.pin_icn);
-    }
-
-    // Ticks the internal register writes
-    // TODO: Implement the following:
-    // Write busy flag
-    // Status register reads
-    // High registers functionality
-    // Remaining low registers
-    // Dynamic key-on registers
-    void Bocchi2151::tickReg()
-    {
-	addr_ld = areg_rq_synced[2];
-	data_ld = dreg_rq_synced[2];
-
-	/*
-	if (addr_ld)
-	{
-	    cout << "Setting address bus to " << hex << int(dbus_latch) << endl;
-	}
-
-	if (data_ld)
-	{
-	    cout << "Setting data bus to " << hex << int(dbus_latch) << endl;
-	}
-	*/
-
-	// Low registers logic
-
-	loreg_data_en = (loreg_addr_valid && data_ld);
-
-	if (phi1_fall)
-	{
-	    loreg_addr_valid = ((addr_ld && (dbus_latch < 0x20)) || (loreg_addr_valid && !addr_ld));
-	    loreg_addr = dbus_latch;
+	    addr_val = data_in;
 	}
 
 	if (phi1_rise)
 	{
-	    if (!mrst_n)
+	    if (mrst)
 	    {
-		noise_enable = false;
-		noise_freq = 0;
-
-		timer_a_run = false;
-		timer_b_run = false;
-
-		timer_a_irq_en = false;
-		timer_b_irq_en = false;
-
-		csm_reg = false;
-		key_on_temp = 0;
-
-		lfo_freq = 0;
+		busy_counter = 0;
 	    }
-	    else if (loreg_data_en)
+	    else if (is_busy_cnt)
 	    {
-		switch (loreg_addr)
+		busy_counter = ((busy_counter + 1) & 0x1F);
+	    }
+	}
+
+	if (phi1_rise)
+	{
+	    is_write_busy = ((is_write_busy && !(mrst || (is_busy_full && is_busy_cnt))) || data_latch[2]);
+	}
+
+	if (phi1_fall)
+	{
+	    is_busy_full = (busy_counter == 0x1F);
+	    is_busy_cnt = is_write_busy;
+	}
+
+	if (phi1_fall && reg_data_ready)
+	{
+	    uint8_t slot = timing_counter;
+	    uint8_t channel = (slot & 7);
+
+	    if ((reg_addr_val & 0xE7) == (0x20 | channel))
+	    {
+		cout << "Writing value of " << hex << int(reg_data_val) << " to hi-reg channel address of " << hex << int(reg_addr_val) << endl;
+
+		uint8_t ch_addr = ((reg_addr_val >> 3) & 0x3);
+
+		switch (ch_addr)
 		{
-		    case 0x08:
+		    case 0:
 		    {
-			key_on_temp = (dbus_latch & 0x7F);
+			channel_rl.at(channel) = ((reg_data_val >> 6) & 0x3);
+			channel_fb.at(channel) = ((reg_data_val >> 3) & 0x7);
+			channel_alg.at(channel) = (reg_data_val & 0x7);
 		    }
 		    break;
-		    case 0x0F:
+		    case 1:
 		    {
-			noise_enable = testbit(dbus_latch, 7);
-			noise_freq = (dbus_latch & 0x1F);
+			channel_kc.at(channel) = (reg_data_val & 0x7F);
 		    }
 		    break;
-		    case 0x14:
+		    case 2:
 		    {
-			timer_a_run = testbit(dbus_latch, 0);
-			timer_b_run = testbit(dbus_latch, 1);
-			timer_a_irq_en = testbit(dbus_latch, 2);
-			timer_b_irq_en = testbit(dbus_latch, 3);
-			csm_reg = testbit(dbus_latch, 7);
+			channel_kf.at(channel) = ((reg_data_val >> 2) & 0x3F);
 		    }
 		    break;
-		    case 0x18:
+		    case 3:
 		    {
-			lfo_freq = dbus_latch;
-		    }
-		    break;
-		    case 0x19:
-		    {
-			if (testbit(dbus_latch, 7))
-			{
-			    pms_data = (dbus_latch & 0x7F);
-			}
-			else
-			{
-			    ams_data = (dbus_latch & 0x7F);
-			}
-		    }
-		    break;
-		    default:
-		    {
-			cout << "Writing value of " << hex << int(dbus_latch) << " to low register of " << hex << int(loreg_addr) << endl;
+			channel_pms.at(channel) = ((reg_data_val >> 4) & 0x7);
+			channel_ams.at(channel) = (reg_data_val & 0x3);
 		    }
 		    break;
 		}
 	    }
-	}
-
-	bool dbus_temp_en = !(current_pins.pin_csn || current_pins.pin_wrn);
-
-	if (dbus_temp_en)
-	{
-	    dbus_temp = current_pins.data;
-	}
-
-	if (phi1_fall)
-	{
-	    if (!mrst_n)
+	    else if ((reg_addr_val & 0x1F) == slot)
 	    {
-		dbus_latch = 0;
-	    }
-	    else if (areg_rq_synced[1] || dreg_rq_synced[1])
-	    {
-		dbus_latch = dbus_temp;
+		cout << "Writing value of " << hex << int(reg_data_val) << " to hi-reg operator address of " << hex << int(reg_addr_val) << endl;
 	    }
 	}
 
-	bool areg_rq_latch_set = !((current_pins.pin_csn || current_pins.pin_wrn || current_pins.pin_a0 || !mrst_n) || areg_rq_synced[1]);
-	bool areg_rq_latch_rst = (areg_rq_synced[1] || !mrst_n);
-
-	areg_rq_latch = (areg_rq_latch_set && !areg_rq_latch_rst);
-
-	bool dreg_rq_latch_set = !((current_pins.pin_csn || current_pins.pin_wrn || !current_pins.pin_a0 || !mrst_n) || dreg_rq_synced[1]);
-	bool dreg_rq_latch_rst = (dreg_rq_synced[1] || !mrst_n);
-
-	dreg_rq_latch = (dreg_rq_latch_set && !dreg_rq_latch_rst);
-
-	if (phi1_fall)
+	if (phi1_rise && data_latch[2] && (addr_val < 0x20))
 	{
-	    if (!mrst_n)
-	    {
-		areg_rq_synced[0] = false;
-		areg_rq_synced[2] = false;
-
-		dreg_rq_synced[0] = false;
-		dreg_rq_synced[2] = false;
-	    }
-	    else
-	    {
-		areg_rq_synced[0] = areg_rq_latch;
-		areg_rq_synced[2] = areg_rq_synced[1];
-
-		dreg_rq_synced[0] = dreg_rq_latch;
-		dreg_rq_synced[2] = dreg_rq_synced[1];
-	    }
+	    cout << "Writing value of " << hex << int(data_in) << " to address of " << hex << int(addr_val) << endl;
 	}
 
 	if (phi1_rise)
 	{
-	    if (!mrst_n)
+	    reg_data_ready = (reg_data_ready && !addr_latch[2]);
+
+	    if (reg_addr_ready && data_latch[2])
 	    {
-		areg_rq_synced[1] = false;
-		dreg_rq_synced[1] = false;
-	    }
-	    else
-	    {
-		areg_rq_synced[1] = areg_rq_synced[0];
-		dreg_rq_synced[1] = dreg_rq_synced[0];
+		reg_data_val = data_in;
+		reg_data_ready = true;
 	    }
 	}
+
+	if (phi1_fall)
+	{
+	    reg_addr_ready = (reg_addr_ready && !addr_latch[2]);
+
+	    if (addr_latch[2] && ((addr_val & 0xE0) != 0))
+	    {
+		reg_addr_val = addr_val;
+		reg_addr_ready = true;
+	    }
+	}
+
+	bool addr_set = (mrst || (!current_pins.pin_a0 && !current_pins.pin_wrn && !current_pins.pin_csn));
+	bool data_set = (current_pins.pin_a0 && !current_pins.pin_wrn && !current_pins.pin_csn && !mrst);
+
+	if (phi1_fall)
+	{
+	    addr_latch[0] = (addr_set && !addr_latch[1]);
+	    addr_latch[2] = addr_latch[1];
+
+	    data_latch[0] = (data_set && !data_latch[1]);
+	    data_latch[2] = data_latch[1];
+	}
+
+	if (phi1_rise)
+	{
+	    addr_latch[1] = addr_latch[0];
+	    data_latch[1] = data_latch[0];
+	}
+
+	if (!current_pins.pin_csn && !current_pins.pin_rdn && current_pins.pin_a0 && !mrst)
+	{
+	    current_pins.data = (is_write_busy << 7);
+	}
+    }
+
+    /*
+    uint16_t Bocchi2151::calcKCode()
+    {
+	uint16_t lfp_val = (lfp_deviance & 0x1FFF);
+	if (lfp_sign)
+	{
+	    lfp_val = (~lfp_val & 0x1FFF);
+	}
+
+	uint16_t freq_kcode = ((out_kc << 6) | out_kf);
+	uint16_t freq_sum = (freq_kcode + lfp_val + lfp_sign);
+	bool freq_overflow = testbit(freq_sum, 13);
+	freq_sum &= 0x1FFF;
+
+	uint16_t notegroup_sum = ((freq_kcode & 0xFF) + (lfp_val & 0xFF) + lfp_sign);
+	bool notegroup_overflow = testbit(notegroup_sum, 8);
+
+	uint16_t rearranged_sum = freq_sum;
+
+	bool notegroup_no_pitch_mod = (((lfp_val >> 6) & 0x3) == 0);
+
+	if (!lfp_sign && ((((freq_sum >> 6) & 0x3) == 3) || notegroup_overflow))
+	{
+	    rearranged_sum += 64;
+	}
+
+	if (lfp_sign && !notegroup_overflow && !notegroup_no_pitch_mod)
+	{
+	    rearranged_sum -= 64;
+	}
+
+	bool rearranged_overflow = testbit(rearranged_sum, 13);
+	rearranged_sum &= 0x1FFF;
+
+	bool sub1 = !(notegroup_no_pitch_mod || notegroup_overflow || !lfp_sign);
+
+	if ((lfp_sign && !freq_overflow) || (sub1 && !rearranged_overflow && (lfp_sign || !freq_overflow)))
+	{
+	    rearranged_sum = 0;
+	}
+
+	if (!lfp_sign && (freq_overflow || rearranged_overflow))
+	{
+	    rearranged_sum = 8127;
+	}
+
+	uint8_t freq_dt2 = 0;
+
+	uint8_t freq_frac = (rearranged_sum & 0x3F);
+	uint8_t freq_int = ((rearranged_sum >> 6) & 0x7F);
+
+	switch (freq_dt2)
+	{
+	    case 2: freq_frac += 52; break;
+	    case 3: freq_frac += 32; break;
+	    default: break;
+	}
+
+	bool freq_frac_carry = testbit(freq_frac, 6);
+	freq_frac &= 0x3F;
+
+	uint32_t detune_add_index = ((freq_dt2 << 3) | (freq_frac_carry << 2) | (freq_int & 0x3));
+
+	freq_int += detune_add_table.at(detune_add_index);
+
+	uint16_t final_freq = 0;
+
+	if (testbit(freq_int, 7))
+	{
+	    final_freq = 8127;
+	}
+	else
+	{
+	    final_freq = (((freq_int & 0x7F) << 6) | freq_frac);
+	}
+
+	return final_freq;
+    }
+    */
+
+    // Tick function for phase generator
+    void Bocchi2151::tickPhase()
+    {
+	// TODO: Implement this
+	return;
     }
 };

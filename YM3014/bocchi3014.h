@@ -16,40 +16,37 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef BOCCHI3012_H
-#define BOCCHI3012_H
+#ifndef BOCCHI3014_H
+#define BOCCHI3014_H
 
 #include <iostream>
 #include <cstdint>
 #include <array>
 using namespace std;
 
-namespace bocchi3012
+namespace bocchi3014
 {
-    struct Bocchi3012Pins
+    struct Bocchi3014Pins
     {
-	bool pin_nicl = true;
-	bool pin_sy = false;
-	bool pin_sh1 = false;
-	bool pin_sh2 = false;
-	bool pin_so = false;
+	bool pin_clock = false;
+	bool pin_load = false;
+	bool pin_sd = false;
     };
 
-    class Bocchi3012
+    class Bocchi3014
     {
 	public:
-	    Bocchi3012();
-	    ~Bocchi3012();
+	    Bocchi3014();
+	    ~Bocchi3014();
 
 	    void init();
-	    void reset();
 	    void tickCLK(bool clk);
 
 	    void setSampleRates(uint32_t clock_rate, uint32_t sample_rate);
 	    bool isValidSample();
-	    array<int16_t, 2> getSamples();
+	    int16_t getSample();
 
-	    Bocchi3012Pins &getPins()
+	    Bocchi3014Pins &getPins()
 	    {
 		return current_pins;
 	    }
@@ -61,7 +58,7 @@ namespace bocchi3012
 		return ((reg >> bit) & 0x1) ? true : false;
 	    }
 
-	    Bocchi3012Pins current_pins;
+	    Bocchi3014Pins current_pins;
 
 	    int64_t sample_divider = 0;
 	    int64_t counter = 0;
@@ -69,38 +66,28 @@ namespace bocchi3012
 	    bool valid_sample = false;
 
 	    void tickValidSample();
-
-	    array<int16_t, 2> final_samples;
-	    array<int16_t, 2> output;
-
-	    uint16_t reg_sr = 0;
-
-	    uint16_t left_sr = 0;
-	    uint16_t right_sr = 0;
-
-	    uint16_t left_latch = 0;
-	    uint16_t right_latch = 0;
-
-	    bool prev_clk = false;
-	    bool prev_res = true;
+	    void tickInternal();
 
 	    bool clk_rise = false;
+	    bool prev_clk = false;
 
-	    bool sh1_val = false;
-	    bool sh2_val = false;
+	    bool prev_clock = false;
 
-	    bool prev_sy = true;
-	    bool prev_sh1 = false;
-	    bool prev_sh2 = false;
+	    bool load_val = false;
+	    bool prev_load = false;
 
-	    void tickInternal();
+	    int16_t final_sample = 0;
+	    int16_t output = 0;
 
 	    int16_t calcSample(uint16_t latch);
 
+	    uint16_t sample_sr = 0;
+	    uint16_t sample_latch = 0;
+
 	    static constexpr int num_frac_bits = 12;
+
     };
+
 };
 
-
-
-#endif // BOCCHI3012_H
+#endif // BOCCHI3014_H
