@@ -68,6 +68,7 @@ namespace bocchi2151
     void Bocchi2151::tickInternal()
     {
 	// TODO: Finish implementing this
+	tickOp();
 	tickPhase();
 	tickReg();
 	tickTimingGen();
@@ -265,7 +266,6 @@ namespace bocchi2151
 	}
     }
 
-    /*
     uint16_t Bocchi2151::calcKCode()
     {
 	uint16_t lfp_val = (lfp_deviance & 0x1FFF);
@@ -343,12 +343,63 @@ namespace bocchi2151
 
 	return final_freq;
     }
-    */
 
     // Tick function for phase generator
     void Bocchi2151::tickPhase()
     {
-	// TODO: Implement this
+	// TODO: Finish implementing this
+
+	// Cycles 10-17
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 27) & 0x1F);
+	    // phaseReset1();
+	    slot = ((timing_counter + 25) & 0x1F);
+	    // phaseReset2();
+	    slot = ((timing_counter + 24) & 0x1F);
+	    pg_phase.at(slot) += pg_delta.at(slot);
+	    pg_phase.at(slot) &= 0xFFFFF;
+	}
+
+	// Cycles 3-9
+	if (phi1_fall)
+	{
+	    uint8_t slot = timing_counter;
+	    uint16_t fnum = pg_fnum.at(slot);
+	    uint8_t kcode = pg_kcode.at(slot);
+	    uint8_t block = (kcode >> 2);
+	    uint32_t freq_num = ((fnum << block) >> 2);
+	    pg_delta.at(slot) = (freq_num & 0xFFFFF);
+	}
+
+	// Cycles 0-2
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 7) & 0x1F);
+	    uint8_t channel = (slot & 0x7);
+	    lfp_deviance = 0;
+	    lfp_sign = false;
+
+	    out_kc = channel_kc.at(channel);
+	    out_kf = channel_kf.at(channel);
+	    uint16_t kcode = calcKCode();
+	    pg_fnum.at(slot) = fnum_table.at(kcode & 0x3FF);
+	    pg_kcode.at(slot) = (kcode >> 8);
+	}
+
 	return;
+    }
+
+    void Bocchi2151::tickOp()
+    {
+	// TODO: Finish implementing this
+
+	// Cycle 40
+	if (phi1_fall)
+	{
+	    uint8_t slot = timing_counter;
+	    op_phase_in = (pg_phase.at(slot) >> 10);
+	    op_mod_in = 0;
+	}
     }
 };

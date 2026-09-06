@@ -126,6 +126,20 @@ namespace bocchi2151
 
 	    uint16_t calcKCode();
 
+	    uint16_t lfp_deviance = 0;
+	    bool lfp_sign = false;
+	    uint8_t out_kc = 0;
+	    uint8_t out_kf = 0;
+
+	    array<uint16_t, 32> pg_fnum = {{0}};
+	    array<uint8_t, 32> pg_kcode = {{0}};
+
+	    uint16_t op_phase_in = 0;
+	    uint16_t op_mod_in = 0;
+
+	    array<uint32_t, 32> pg_phase = {{0}};
+	    array<uint32_t, 32> pg_delta = {{0}};
+
 	    array<uint8_t, 8> channel_rl = {{0}};
 	    array<uint8_t, 8> channel_fb = {{0}};
 	    array<uint8_t, 8> channel_alg = {{0}};
