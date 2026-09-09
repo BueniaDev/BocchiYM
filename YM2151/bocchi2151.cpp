@@ -68,7 +68,9 @@ namespace bocchi2151
     void Bocchi2151::tickInternal()
     {
 	// TODO: Finish implementing this
+	tickAcc();
 	tickOp();
+	tickEnv();
 	tickPhase();
 	tickReg();
 	tickTimingGen();
@@ -95,19 +97,19 @@ namespace bocchi2151
 	if (clk_rise)
 	{
 	    phi1_dff_q = ((is_rst2 && !current_pins.pin_icn) || !phi1_dff_q);
-	} 
-
-	phi1_rise = (phi1_dff_q && clk_rise);
-	phi1_fall = (!phi1_dff_q && clk_rise);
-
-	current_pins.pin_phi1 = phi1_dff_q;
+	}
 
 	if (phi1_fall)
 	{
-	    uint8_t sh_counter = ((timing_counter + 27) % 32);
-	    current_pins.pin_sh1 = (((sh_counter & 24) == 8) || mrst);
-	    current_pins.pin_sh2 = (((sh_counter & 24) == 24) || mrst);
+	    uint8_t sh_counter = ((timing_counter + 27) & 0x1F);
+	    current_pins.pin_sh1 = (((sh_counter & 24) == 8) && !mrst);
+	    current_pins.pin_sh2 = (((sh_counter & 24) == 24) && !mrst);
 	}
+
+	phi1_rise = (!phi1_dff_q && clk_rise);
+	phi1_fall = (phi1_dff_q && clk_rise);
+
+	current_pins.pin_phi1 = !phi1_dff_q;
 
 	if (phi1_fall)
 	{
@@ -178,7 +180,7 @@ namespace bocchi2151
 
 	    if ((reg_addr_val & 0xE7) == (0x20 | channel))
 	    {
-		cout << "Writing value of " << hex << int(reg_data_val) << " to hi-reg channel address of " << hex << int(reg_addr_val) << endl;
+		// cout << "Writing value of " << hex << int(reg_data_val) << " to hi-reg channel address of " << hex << int(reg_addr_val) << endl;
 
 		uint8_t ch_addr = ((reg_addr_val >> 3) & 0x3);
 
@@ -211,13 +213,27 @@ namespace bocchi2151
 	    }
 	    else if ((reg_addr_val & 0x1F) == slot)
 	    {
-		cout << "Writing value of " << hex << int(reg_data_val) << " to hi-reg operator address of " << hex << int(reg_addr_val) << endl;
+		// cout << "Writing value of " << hex << int(reg_data_val) << " to hi-reg operator address of " << hex << int(reg_addr_val) << endl;
 	    }
 	}
 
 	if (phi1_rise && data_latch[2] && (addr_val < 0x20))
 	{
-	    cout << "Writing value of " << hex << int(data_in) << " to address of " << hex << int(addr_val) << endl;
+	    // cout << "Writing value of " << hex << int(data_in) << " to address of " << hex << int(addr_val) << endl;
+
+	    switch (addr_val)
+	    {
+		case 0x08:
+		{
+		    for (int i = 0; i < 4; i++)
+		    {
+			mode_kon_oper.at(i) = testbit(data_in, (3 + i));
+		    }
+
+		    mode_kon_ch = (data_in & 0x7);
+		}
+		break;
+	    }
 	}
 
 	if (phi1_rise)
@@ -263,6 +279,30 @@ namespace bocchi2151
 	if (!current_pins.pin_csn && !current_pins.pin_rdn && current_pins.pin_a0 && !mrst)
 	{
 	    current_pins.data = (is_write_busy << 7);
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 8) & 0x1F);
+
+	    if (kon_chmatch)
+	    {
+		mode_kon.at(slot) = mode_kon_oper.at(0);
+		mode_kon.at((slot + 8) & 0x1F) = mode_kon_oper.at(2);
+		mode_kon.at((slot + 16) & 0x1F) = mode_kon_oper.at(1);
+		mode_kon.at((slot + 24) & 0x1F) = mode_kon_oper.at(3);
+	    }
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t cycles = ((timing_counter + 1) & 0x1F);
+	    kon_chmatch = false;
+
+	    if ((mode_kon_ch + 24) == cycles)
+	    {
+		kon_chmatch = true;
+	    }
 	}
     }
 
@@ -353,10 +393,21 @@ namespace bocchi2151
 	if (phi1_fall)
 	{
 	    uint8_t slot = ((timing_counter + 27) & 0x1F);
-	    // phaseReset1();
+	    pg_reset_latch.at(slot) = pg_reset.at(slot);
 	    slot = ((timing_counter + 25) & 0x1F);
-	    // phaseReset2();
+
+	    if (pg_reset_latch.at(slot))
+	    {
+		pg_delta.at(slot) = 0;
+	    }
+
 	    slot = ((timing_counter + 24) & 0x1F);
+
+	    if (pg_reset_latch.at(slot))
+	    {
+		pg_phase.at(slot) = 0;
+	    }
+
 	    pg_phase.at(slot) += pg_delta.at(slot);
 	    pg_phase.at(slot) &= 0xFFFFF;
 	}
@@ -390,9 +441,176 @@ namespace bocchi2151
 	return;
     }
 
+    void Bocchi2151::tickEnv()
+    {
+	// TODO: Finish implementing this
+
+	// Temporary mrst setting until envelope generator is properly implemented
+	if (mrst)
+	{
+	    eg_level.fill(0x3FF);
+	}
+
+	if (phi1_fall)
+	{
+	    eg_out.at(1) = eg_out.at(0);
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 29) & 0x1F);
+	    uint32_t level = eg_level.at(slot);
+
+	    if (eg_mute || mrst)
+	    {
+		level = 0x3FF;
+	    }
+
+	    // Temporary setting until envelope generator is properly implemented
+	    if (pg_reset.at(slot))
+	    {
+		level = 0;
+	    }
+
+	    eg_level.at(slot) = uint16_t(level);
+
+	    eg_out.at(0) = eg_out_temp.at(1);
+
+	    if (testbit(eg_out.at(0), 10))
+	    {
+		eg_out.at(0) = 1023;
+	    }
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 30) & 0x1F);
+
+	    bool kon = (key_on.at(slot) && !key_on2.at(slot));
+	    pg_reset.at(slot) = kon;
+
+	    bool eg_off = ((eg_level.at(slot) & 0x3F0) == 0x3F0);
+	    eg_mute = (eg_off && !kon);
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 31) & 0x1F);
+
+	    eg_out_temp.at(1) = eg_out_temp.at(0);
+	    eg_out_temp.at(0) = eg_level.at(slot);
+
+	    if (testbit(eg_out_temp.at(0), 10))
+	    {
+		eg_out_temp.at(0) = 1023;
+	    }
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 2) & 0x1F);
+	    bool kon = mode_kon.at(slot);
+
+	    key_on2.at(slot) = key_on.at(slot);
+	    key_on.at(slot) = kon;
+	}
+    }
+
     void Bocchi2151::tickOp()
     {
 	// TODO: Finish implementing this
+
+	// Cycle 53 (WIP)
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 19) & 0x1F);
+	    uint8_t channel = (slot & 0x7);
+	    uint8_t rl = channel_rl.at(channel);
+	    op_out[5] = op_out[4];
+	    op_mix = op_out[4];
+	    op_mixl = testbit(rl, 0);
+	    op_mixr = testbit(rl, 1);
+	}
+
+	// Cycle 52 (WIP)
+	if (phi1_fall)
+	{
+	    op_out[4] = op_out[3];
+	}
+
+	// Cycles 50-51
+	if (phi1_fall)
+	{
+	    op_out[3] = op_out[2];
+	    op_out[2] = op_out[1];
+	}
+
+	// Cycle 49
+	if (phi1_fall)
+	{
+	    int16_t out = op_out[0];
+
+	    if (testbit(op_sign, 6))
+	    {
+		out ^= 0x3FFF;
+		out = ((out + 1) & 0x3FFF);
+	    }
+
+	    out <<= 2;
+	    out >>= 2;
+	    op_out[1] = out;
+	}
+
+	// Cycle 48
+	if (phi1_fall)
+	{
+	    int16_t out = ((op_exp[1] << 2) >> op_pow[1]);
+	    op_out[0] = out;
+	}
+
+	// Cycles 46-47
+	if (phi1_fall)
+	{
+	    op_exp[1] = op_exp[0];
+	    op_pow[1] = op_pow[0];
+
+	    op_exp[0] = exp_table.at(op_atten & 0xFF);
+	    op_pow[0] = (op_atten >> 8);
+	}
+
+	// Cycle 45
+	if (phi1_fall)
+	{
+	    op_atten = (op_logsin[2] + (eg_out[1] << 2));
+
+	    if (testbit(op_atten, 12))
+	    {
+		op_atten = 4095;
+	    }
+	}
+
+	// Cycles 42-44
+	if (phi1_fall)
+	{
+	    op_logsin[2] = op_logsin[1];
+	    op_logsin[1] = op_logsin[0];
+
+	    uint16_t phase = (op_phase & 0xFF);
+
+	    if (testbit(op_phase, 8))
+	    {
+		phase ^= 0xFF;
+	    }
+
+	    op_logsin[0] = sine_table.at(phase);
+	    op_sign = ((op_sign << 1) | testbit(op_phase, 9));
+	}
+
+	// Cycle 41
+	if (phi1_fall)
+	{
+	    op_phase = ((op_phase_in + op_mod_in) & 0x3FF);
+	}
 
 	// Cycle 40
 	if (phi1_fall)
@@ -400,6 +618,185 @@ namespace bocchi2151
 	    uint8_t slot = timing_counter;
 	    op_phase_in = (pg_phase.at(slot) >> 10);
 	    op_mod_in = 0;
+	}
+    }
+
+    void Bocchi2151::tickAcc()
+    {
+	// TODO: Finish implementing this
+
+	if (phi1_fall)
+	{
+	    current_pins.pin_so = sound_out;
+	}
+
+	if (phi1_fall)
+	{
+	    sound_out = false;
+
+	    switch (timing_counter & 0xF)
+	    {
+		case 0: sound_out = mix_sign_lock; break;
+		case 1: sound_out = testbit(mix_exp_lock, 0); break;
+		case 2: sound_out = testbit(mix_exp_lock, 1); break;
+		case 3: sound_out = testbit(mix_exp_lock, 2); break;
+		default:
+		{
+		    if (mix_exp_lock != 0)
+		    {
+			sound_out = testbit(mix_bits, (mix_exp_lock - 1));
+		    }
+		}
+		break;
+	    }
+	}
+
+	if (phi1_fall)
+	{
+	    uint8_t slot = ((timing_counter + 30) & 0x1F);
+
+	    bool bit = false;
+
+	    if (slot < 16)
+	    {
+		bit = mix_left_stream[3];
+	    }
+	    else
+	    {
+		bit = mix_right_stream[3];
+	    }
+
+	    if ((timing_counter & 0xF) == 1)
+	    {
+		mix_top_bits = (((mix_bits >> 15) & 0x3F) | (bit << 6));
+	    }
+
+	    if ((timing_counter & 0xF) == 7)
+	    {
+		uint8_t top = (mix_top_bits & 0x3F);
+		uint8_t ex = 0;
+
+		if (!testbit(mix_top_bits, 6))
+		{
+		    top ^= 63;
+		}
+
+		if (testbit(top, 5))
+		{
+		    ex = 7;
+		}
+		else if (testbit(top, 4))
+		{
+		    ex = 6;
+		}
+		else if (testbit(top, 3))
+		{
+		    ex = 5;
+		}
+		else if (testbit(top, 2))
+		{
+		    ex = 4;
+		}
+		else if (testbit(top, 1))
+		{
+		    ex = 3;
+		}
+		else if (testbit(top, 0))
+		{
+		    ex = 2;
+		}
+		else
+		{
+		    ex = 1;
+		}
+
+		mix_sign_lock = testbit(mix_top_bits, 6);
+		mix_exp_lock = ex;
+	    }
+
+	    mix_bits = ((mix_bits >> 1) | (bit << 20));
+	}
+
+	if (phi1_fall)
+	{
+	    mix_left_stream[3] = mix_left_stream[2];
+	    mix_left_stream[2] = mix_left_stream[1];
+	    mix_left_stream[1] = mix_left_stream[0];
+
+	    mix_right_stream[3] = mix_right_stream[2];
+	    mix_right_stream[2] = mix_right_stream[1];
+	    mix_right_stream[1] = mix_right_stream[0];
+	}
+
+	if (phi1_fall)
+	{
+	    switch (mix_sat_ctrl[0])
+	    {
+		case 0:
+		case 7: mix_left_stream[0] = testbit(mix_piso[0], 0); break;
+		case 1:
+		case 2:
+		case 3: mix_left_stream[0] = true; break;
+		case 4:
+		case 5:
+		case 6: mix_left_stream[0] = false; break;
+	    }
+
+	    switch (mix_sat_ctrl[1])
+	    {
+		case 0:
+		case 7: mix_right_stream[0] = testbit(mix_piso[1], 0); break;
+		case 1:
+		case 2:
+		case 3: mix_right_stream[0] = true; break;
+		case 4:
+		case 5:
+		case 6: mix_right_stream[0] = false; break;
+	    }
+	}
+
+	if (phi1_fall)
+	{
+	    if (timing_counter == 13)
+	    {
+		mix_piso[1] = ((!testbit(mix_accum[1], 17) << 15) | (mix_accum[1] & 0x7FFF));
+		mix_sat_ctrl[1] = ((mix_accum[1] >> 15) & 0x7);
+	    }
+	    else
+	    {
+		mix_piso[1] >>= 1;
+	    }
+
+	    if (timing_counter == 29)
+	    {
+		mix_piso[0] = ((!testbit(mix_accum[0], 17) << 15) | (mix_accum[0] & 0x7FFF));
+		mix_sat_ctrl[0] = ((mix_accum[0] >> 15) & 0x7);
+	    }
+	    else
+	    {
+		mix_piso[0] >>= 1;
+	    }
+	}
+
+	if (phi1_fall)
+	{
+	    if (timing_counter == 13)
+	    {
+		mix_accum[1] = (op_mixr) ? int32_t(op_mix) : 0;
+	    }
+	    else
+	    {
+		mix_accum[1] += int32_t(op_mix);
+	    }
+
+	    if (timing_counter == 29)
+	    {
+		mix_accum[0] = (op_mixl) ? int32_t(op_mix) : 0;
+	    }
+	    else if (op_mixl)
+	    {
+		mix_accum[0] += int32_t(op_mix);
+	    }
 	}
     }
 };

@@ -74,10 +74,9 @@ namespace bocchi2151
 	    void tickTimingGen();
 	    void tickReg();
 	    void tickPhase();
+	    void tickEnv();
 	    void tickOp();
-	    /*
 	    void tickAcc();
-	    */
 
 	    bool phim = false;
 
@@ -136,9 +135,48 @@ namespace bocchi2151
 
 	    uint16_t op_phase_in = 0;
 	    uint16_t op_mod_in = 0;
+	    uint16_t op_phase = 0;
+	    uint16_t op_atten = 0;
+
+	    array<uint16_t, 3> op_logsin = {{0}};
+	    uint16_t op_sign = 0;
+
+	    array<uint16_t, 2> op_exp = {{0}};
+	    array<uint16_t, 2> op_pow = {{0}};
+
+	    array<int16_t, 6> op_out = {{0}};
+	    int16_t op_mix = 0;
+	    bool op_mixl = false;
+	    bool op_mixr = false;
+
+	    array<int32_t, 2> mix_accum = {{0}};
+	    array<uint32_t, 2> mix_piso = {{0}};
+	    array<uint8_t, 2> mix_sat_ctrl = {{0}};
+	    array<bool, 4> mix_left_stream = {{false}};
+	    array<bool, 4> mix_right_stream = {{false}};
+	    uint8_t mix_top_bits = 0;
+	    uint32_t mix_bits = 0;
+	    bool mix_sign_lock = false;
+	    uint8_t mix_exp_lock = 0;
+	    bool sound_out = false;
+
+	    uint8_t mode_kon_ch = 0;
+	    array<bool, 4> mode_kon_oper = {{false}};
+	    bool kon_chmatch = false;
+
+	    array<bool, 32> mode_kon = {{false}};
+	    array<bool, 32> key_on = {{false}};
+	    array<bool, 32> key_on2 = {{false}};
+	    array<bool, 32> pg_reset = {{false}};
+	    array<bool, 32> pg_reset_latch = {{false}};
 
 	    array<uint32_t, 32> pg_phase = {{0}};
 	    array<uint32_t, 32> pg_delta = {{0}};
+
+	    array<uint16_t, 2> eg_out = {{0}};
+	    array<uint16_t, 2> eg_out_temp = {{0}};
+	    array<uint16_t, 32> eg_level = {{0}};
+	    bool eg_mute = false;
 
 	    array<uint8_t, 8> channel_rl = {{0}};
 	    array<uint8_t, 8> channel_fb = {{0}};
