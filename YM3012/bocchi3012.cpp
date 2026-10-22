@@ -1,6 +1,6 @@
 /*
     This file is part of the BocchiYM family of cycle-accurate Yamaha FM sound chip emulators.
-    Copyright (C) 2023 BueniaDev.
+    Copyright (C) 2026 BueniaDev.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -21,7 +21,8 @@
 //
 // Bocchi's Notes:
 // This file contains the implementation of the YM3012 DAC.
-// Like with a real YM3012, it is typically meant to be used with its corresponding YM2151 implementation.
+// Like with a real YM3012, it is typically meant to be used with its corresponding YM2151 implementation
+// (or an equivalent implementation using other libraries).
 
 #include "bocchi3012.h"
 using namespace bocchi3012;
@@ -31,7 +32,7 @@ namespace bocchi3012
 {
     Bocchi3012::Bocchi3012()
     {
-
+	valid_sample = false;
     }
 
     Bocchi3012::~Bocchi3012()
@@ -44,6 +45,15 @@ namespace bocchi3012
     {
 	current_pins = {};
 	output.fill(0);
+    }
+
+    // Resets the emulated YM3012
+    void Bocchi3012::reset()
+    {
+	current_pins.pin_nicl = false;
+	tickCLK(true);
+	tickCLK(false);
+	current_pins.pin_nicl = true;
     }
 
     // Initializes the sample divider variables used for nearest-neighbor resampling
@@ -60,7 +70,7 @@ namespace bocchi3012
 	    throw runtime_error("Bocchi3012 error");
 	}
 
-	sample_divider = int64_t(float(clock_rate / sample_rate) * (1 << num_frac_bits));
+	sample_divider = int64_t((float(clock_rate) / float(sample_rate)) * (1 << num_frac_bits));
 	counter = sample_divider;
     }
 
@@ -78,7 +88,8 @@ namespace bocchi3012
 	clk_rise = (!prev_clk && clk);
 	if (!current_pins.pin_nicl)
 	{
-	    reg_sr = 0;
+	    left_sr = 0;
+	    right_sr = 0;
 	    prev_sh1 = false;
 	    prev_sh2 = false;
 	    prev_sy = false;
@@ -95,43 +106,63 @@ namespace bocchi3012
 
     void Bocchi3012::tickInternal()
     {
+	if (!prev_sy && current_pins.pin_sy)
+	{
+	    left_sr = ((left_sr >> 1) | (current_pins.pin_so << 13));
+	    right_sr = ((right_sr >> 1) | (current_pins.pin_so << 13));
+	}
+
+	if (!prev_sy && current_pins.pin_sy)
+	{
+	    sh1_val = current_pins.pin_sh1;
+	    sh2_val = current_pins.pin_sh2;
+	}
+
 	if (prev_sy && !current_pins.pin_sy)
 	{
-	    if (prev_sh1 && !current_pins.pin_sh1)
-	    {
-		output[1] = calcSample(reg_sr);
-	    }
+	    prev_sh1 = sh1_val;
+	    prev_sh2 = sh2_val;
+	}
 
-	    if (prev_sh2 && !current_pins.pin_sh2)
-	    {
-		output[0] = calcSample(reg_sr);
-	    }
+	if (prev_sh1 && !sh1_val)
+	{
+	    right_latch = (right_sr & 0x1FFF);
+	}
 
-	    reg_sr = ((reg_sr >> 1) | (current_pins.pin_so << 12));
-
-	    prev_sh1 = current_pins.pin_sh1;
-	    prev_sh2 = current_pins.pin_sh2;
+	if (prev_sh2 && !sh2_val)
+	{
+	    left_latch = (left_sr & 0x1FFF);
 	}
 
 	prev_sy = current_pins.pin_sy;
+
+	output[0] = calcSample(left_latch);
+	output[1] = calcSample(right_latch);
     }
 
     int16_t Bocchi3012::calcSample(uint16_t latch)
     {
 	int exp = ((latch >> 10) & 0x7);
-	int mant = ((latch & 0x3FF) - 512);
+	bool sign = testbit(latch, 9);
+	uint16_t mant = (latch & 0x1FF);
+	uint16_t mask = 0;
 
 	if (exp == 0)
 	{
 	    return 0;
 	}
 
-	return ((mant << exp) >> 1);
+	if (!sign)
+	{
+	    mask = 0xFFFF;
+	}
+
+	mant ^= (mask & 0x1FF);
+	return (((mant << exp) >> 1) ^ mask);
     }
 
     void Bocchi3012::tickValidSample()
     {
-	valid_sample = false;
 	if (clk_rise)
 	{
 	    counter -= (1 << num_frac_bits);
@@ -149,7 +180,9 @@ namespace bocchi3012
     // Returns true if a resampled audio sample is available
     bool Bocchi3012::isValidSample()
     {
-	return valid_sample;
+	bool is_valid_sample = valid_sample;
+	valid_sample = false;
+	return is_valid_sample;
     }
 
     // Returns the value of the resampled audio samples (as a single 16-bit stereo sample)
